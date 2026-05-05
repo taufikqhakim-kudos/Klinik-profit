@@ -3,78 +3,99 @@ import pandas as pd
 import io
 from datetime import datetime
 
-st.set_page_config(page_title="Rekap Harian TPMD", layout="centered")
+# Konfigurasi Halaman
+st.set_page_config(page_title="Klinik Dr. Taufik", layout="centered")
 
-# Inisialisasi 'Buku Catatan' di memori aplikasi
+# Custom CSS untuk Flyer
+st.markdown("""
+    <style>
+    .flyer-box {
+        border: 4px double #007bff;
+        padding: 20px;
+        border-radius: 15px;
+        background-color: #ffffff;
+        color: #333333;
+    }
+    .flyer-header { text-align: center; color: #007bff; font-weight: bold; }
+    </style>
+    """, unsafe_allow_html=True)
+
 if 'rekap_harian' not in st.session_state:
     st.session_state.rekap_harian = []
 
-st.title("📑 Rekap Harian & Margin Klinik")
+st.title("🏥 Manajemen & Edukasi Klinik")
 
-# --- SIDEBAR: PENGATURAN ---
-st.sidebar.header("⚙️ Harga Paket")
-harga_paket = st.sidebar.number_input("Harga Paket (Rp)", value=50000)
+tab1, tab2 = st.tabs(["📊 Rekap & Margin", "📱 Flyer Edukasi"])
 
-# --- UPLOAD DATA STOK ---
-uploaded_file = st.file_uploader("Upload Master Harga Obat (Excel)", type=['xlsx'])
+# --- TAB 1: REKAP & MARGIN ---
+with tab1:
+    st.sidebar.header("⚙️ Pengaturan")
+    harga_paket = st.sidebar.number_input("Harga Paket (Rp)", value=50000)
+    
+    uploaded_file = st.file_uploader("Upload Data Harga Obat (Excel)", type=['xlsx'])
+    
+    if uploaded_file:
+        df_stok = pd.read_excel(uploaded_file)
+        kolom_merk = [c for c in df_stok.columns if 'merk' in c.lower()][0]
+        kolom_harga = [c for c in df_stok.columns if 'harga' in c.lower()][0]
 
-if uploaded_file:
-    df_stok = pd.read_excel(uploaded_file)
-    kolom_merk = [c for c in df_stok.columns if 'merk' in c.lower()][0]
-    kolom_harga = [c for c in df_stok.columns if 'harga' in c.lower()][0]
+        with st.form("form_transaksi", clear_on_submit=True):
+            st.subheader("➕ Input Penggunaan Obat")
+            nama_p = st.text_input("Nama Pasien (Opsional)")
+            obat_p = st.selectbox("Pilih Obat:", ["-- Pilih --"] + list(df_stok[kolom_merk].unique()))
+            jumlah_p = st.number_input("Jumlah Terpakai:", min_value=1, value=1)
+            submit = st.form_submit_button("Tambahkan ke Daftar")
 
-    # --- FORM INPUT PASIEN ---
-    with st.form("form_pasien"):
-        st.subheader("➕ Tambah Transaksi Pasien")
-        nama_pasien = st.text_input("Nama Pasien (Opsional)")
-        obat_dipakai = st.multiselect("Obat yang diberikan:", df_stok[kolom_merk].unique())
-        submit = st.form_submit_button("Simpan ke Rekap Hari Ini")
+            if submit and obat_p != "-- Pilih --":
+                harga_satuan = df_stok[df_stok[kolom_merk] == obat_p][kolom_harga].values[0]
+                total_modal_item = harga_satuan * jumlah_p
+                
+                st.session_state.rekap_harian.append({
+                    "Waktu": datetime.now().strftime("%H:%M"),
+                    "Pasien": nama_p if nama_p else "Anonim",
+                    "Item": obat_p,
+                    "Qty": jumlah_p,
+                    "Total Modal": total_modal_item,
+                    "Margin": harga_paket - total_modal_item
+                })
+                st.success(f"Berhasil menambah {obat_p}")
 
-        if submit and obat_dipakai:
-            # Hitung modal obat untuk pasien ini
-            data_obat = df_stok[df_stok[kolom_merk].isin(obat_dipakai)]
-            total_modal = data_obat[kolom_harga].sum()
-            margin = harga_paket - total_modal
-            
-            # Masukkan ke catatan
-            st.session_state.rekap_harian.append({
-                "Waktu": datetime.now().strftime("%H:%M"),
-                "Pasien": nama_pasien if nama_pasien else "Anonim",
-                "Modal Obat": total_modal,
-                "Laba Bersih": margin
-            })
-            st.success("Data berhasil ditambahkan!")
-
-    # --- TABEL REKAP ---
-    if st.session_state.rekap_harian:
-        st.divider()
-        st.subheader("📊 Ringkasan Hari Ini")
-        df_rekap = pd.DataFrame(st.session_state.rekap_harian)
-        
-        # Tampilan Metrik Utama
-        c1, c2, c3 = st.columns(3)
-        total_modal_all = df_rekap["Modal Obat"].sum()
-        total_laba_all = df_rekap["Laba Bersih"].sum()
-        
-        c1.metric("Total Pasien", len(df_rekap))
-        c2.metric("Dana Belanja Obat", f"Rp {total_modal_all:,.0f}", help="Sisihkan uang ini untuk beli obat lagi")
-        c3.metric("Margin (Laba)", f"Rp {total_laba_all:,.0f}")
-
-        # Tabel Detail
-        st.dataframe(df_rekap, use_container_width=True)
-
-        # Tombol Reset & Download
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("🗑️ Hapus Semua Data (Reset Hari)"):
+        if st.session_state.rekap_harian:
+            st.divider()
+            df_rekap = pd.DataFrame(st.session_state.rekap_harian)
+            c1, c2 = st.columns(2)
+            c1.metric("Dana Stok Ulang", f"Rp {df_rekap['Total Modal'].sum():,.0f}")
+            c2.metric("Total Margin Bersih", f"Rp {df_rekap['Margin'].sum():,.0f}")
+            st.dataframe(df_rekap, use_container_width=True)
+            if st.button("🗑️ Reset Data Hari Ini"):
                 st.session_state.rekap_harian = []
                 st.rerun()
-        with col_btn2:
-            output = io.BytesIO()
-            df_rekap.to_excel(output, index=False)
-            st.download_button("📥 Download Rekap (Excel)", data=output.getvalue(), file_name=f"rekap_{datetime.now().date()}.xlsx")
-    else:
-        st.info("Belum ada data pasien hari ini. Silakan input di form atas.")
 
-else:
-    st.info("Silakan unggah file Excel stok obat Anda.")
+# --- TAB 2: FLYER EDUKASI (DITAMBAH DM) ---
+with tab2:
+    st.subheader("Generator Pesan Edukasi")
+    dict_edukasi = {
+        "Umum": "Istirahat cukup (7-8 jam), minum air putih 2 liter/hari, dan minum obat tepat waktu.",
+        "Demam/Flu": "Kompres hangat jika demam, gunakan masker, hindari es, dan perbanyak buah.",
+        "Maag/Lambung": "Makan sedikit tapi sering, hindari pedas, asam, kopi, dan santan sementara.",
+        "Diabetes (Gula Darah)": "Batasi nasi putih/tepung/manis, rutin olahraga jalan kaki 30 menit, rutin cek gula darah, dan periksa kebersihan kaki setiap hari.",
+        "Darah Tinggi": "Kurangi garam dan lemak, kelola stres, dan rutin cek tekanan darah.",
+        "Gatal/Alergi": "Jangan digaruk, hindari pemicu alergi, dan jaga kebersihan pakaian."
+    }
+    
+    pilihan = st.selectbox("Pilih Topik:", list(dict_edukasi.keys()))
+    nama_f = st.text_input("Nama Pasien untuk Flyer:", "Bapak/Ibu")
+    
+    st.markdown(f"""
+    <div class="flyer-box">
+        <h2 class="flyer-header">🏥 KLINIK DR. TAUFIK</h2>
+        <hr>
+        <p><b>Halo, {nama_f}</b></p>
+        <p>Anjuran pemulihan:</p>
+        <p>✅ <i>{dict_edukasi[pilihan]}</i></p>
+        <br>
+        <p style="color: red; font-size: 0.8em;">⚠️ <b>Segera ke UGD jika:</b> Sesak napas, penurunan kesadaran, atau luka yang sulit sembuh.</p>
+        <hr>
+        <p style="text-align: center; font-size: 0.7em;"><i>Semoga Lekas Sembuh!</i></p>
+    </div>
+    """, unsafe_allow_html=True)
